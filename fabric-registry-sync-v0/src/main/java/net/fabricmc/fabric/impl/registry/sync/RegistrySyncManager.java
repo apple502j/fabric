@@ -20,8 +20,11 @@ import java.io.File;
 import java.io.FileOutputStream;
 import java.io.IOException;
 import java.nio.charset.StandardCharsets;
+import java.util.ArrayList;
 import java.util.LinkedHashMap;
+import java.util.List;
 import java.util.Map;
+import java.util.Objects;
 import java.util.Set;
 import java.util.concurrent.ExecutionException;
 import java.util.concurrent.TimeUnit;
@@ -29,15 +32,24 @@ import java.util.concurrent.TimeoutException;
 import java.util.function.Consumer;
 
 import com.google.common.base.Joiner;
+import com.google.common.base.Strings;
+import com.google.common.collect.HashMultimap;
+import com.google.common.collect.Multimap;
 import com.google.common.collect.Sets;
 import it.unimi.dsi.fastutil.ints.IntOpenHashSet;
 import it.unimi.dsi.fastutil.ints.IntSet;
 import it.unimi.dsi.fastutil.objects.Object2IntLinkedOpenHashMap;
 import it.unimi.dsi.fastutil.objects.Object2IntMap;
 import it.unimi.dsi.fastutil.objects.Object2IntOpenHashMap;
-import org.slf4j.LoggerFactory;
-import org.slf4j.Logger;
+
+import net.minecraft.text.Text;
+
+import net.minecraft.util.registry.RegistryKey;
+
+import org.apache.commons.lang3.StringUtils;
 import org.jetbrains.annotations.Nullable;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 
 import net.minecraft.nbt.NbtCompound;
 import net.minecraft.network.PacketByteBuf;
@@ -55,6 +67,7 @@ import net.fabricmc.fabric.impl.registry.sync.packet.NbtRegistryPacketHandler;
 import net.fabricmc.fabric.impl.registry.sync.packet.RegistryPacketHandler;
 
 public final class RegistrySyncManager {
+	public static final Set<String> VANILLA_NAMESPACES = Set.of("minecraft", "brigadier");
 	public static final boolean DEBUG = Boolean.getBoolean("fabric.registry.debug");
 
 	@Deprecated
@@ -97,7 +110,7 @@ public final class RegistrySyncManager {
 		}
 	}
 
-	public static void receivePacket(ThreadExecutor<?> executor, RegistryPacketHandler handler, PacketByteBuf buf, boolean accept, Consumer<Exception> errorHandler) {
+	public static void receivePacket(ThreadExecutor<?> executor, RegistryPacketHandler handler, PacketByteBuf buf, boolean accept, Consumer<Exception> errorHandler, Consumer<Multimap<Identifier, Identifier>> syncFallbackHandler) {
 		handler.receivePacket(buf);
 
 		if (!handler.isPacketFinished()) {
@@ -122,7 +135,7 @@ public final class RegistrySyncManager {
 					}
 
 					try {
-						apply(map, RemappableRegistry.RemapMode.REMOTE);
+						syncFallbackHandler.accept(apply(map, RemappableRegistry.RemapMode.REMOTE));
 					} catch (RemapException e) {
 						errorHandler.accept(e);
 					}
@@ -286,8 +299,9 @@ public final class RegistrySyncManager {
 		return map;
 	}
 
-	public static void apply(Map<Identifier, Object2IntMap<Identifier>> map, RemappableRegistry.RemapMode mode) throws RemapException {
+	public static Multimap<Identifier, Identifier> apply(Map<Identifier, Object2IntMap<Identifier>> map, RemappableRegistry.RemapMode mode) throws RemapException {
 		Set<Identifier> containedRegistries = Sets.newHashSet(map.keySet());
+		Multimap<Identifier, Identifier> syncFallbackAttempted = HashMultimap.create();
 
 		for (Identifier registryId : Registry.REGISTRIES.getIds()) {
 			if (!containedRegistries.remove(registryId)) {
@@ -304,20 +318,23 @@ public final class RegistrySyncManager {
 				continue;
 			}
 
-			if (registry instanceof RemappableRegistry) {
+			if (registry instanceof RemappableRegistry remappableRegistry) {
 				Object2IntMap<Identifier> idMap = new Object2IntOpenHashMap<>();
 
 				for (Identifier key : registryMap.keySet()) {
 					idMap.put(key, registryMap.getInt(key));
 				}
 
-				((RemappableRegistry) registry).remap(registryId.toString(), idMap, mode);
+				remappableRegistry.remap(registryId.toString(), idMap, mode);
+				syncFallbackAttempted.putAll(registryId, remappableRegistry.getSyncFallbackAttemptedIds());
 			}
 		}
 
 		if (!containedRegistries.isEmpty()) {
 			LOGGER.warn("[fabric-registry-sync] Could not find the following registries: " + Joiner.on(", ").join(containedRegistries));
 		}
+
+		return syncFallbackAttempted;
 	}
 
 	public static void unmap() throws RemapException {
@@ -332,5 +349,58 @@ public final class RegistrySyncManager {
 
 	public static void bootstrapRegistries() {
 		postBootstrap = true;
+	}
+
+	public static void handleSyncFallbackRequest(ServerPlayerEntity player, Multimap<Identifier, Identifier> syncFallbacks) {
+		for (Identifier registryId : syncFallbacks.keySet()) {
+			Registry<?> registry = Registry.REGISTRIES.get(registryId);
+
+			if (!(registry instanceof SyncFallbackAccess syncFallbackAccess) || !SyncFallbackAccess.canUseSyncFallback(registry)) {
+				player.networkHandler.disconnect(Text.of("Invalid registry ID: %s".formatted(registryId)));
+				return;
+			}
+
+			List<String> unknownIds = new ArrayList<>();
+			List<String> unsupportedIds = new ArrayList<>();
+			syncFallbacks.get(registryId).forEach((id) -> {
+				if (registry.get(id) == null) unknownIds.add(id.toString());
+				else if (syncFallbackAccess.getSyncFallback(id) == null) unsupportedIds.add(id.toString());
+			});
+
+			if (!unknownIds.isEmpty()) {
+				String error = "Invalid IDs for registry %s: %s".formatted(registryId, String.join(", ", unknownIds));
+				player.networkHandler.disconnect(Text.of(error));
+				return;
+			}
+
+			if (!unsupportedIds.isEmpty()) {
+				String error = "Sync fallback unsupported for the following items of registry %s, please install mods providing them: %s".formatted(registryId, String.join(", ", unsupportedIds));
+				player.networkHandler.disconnect(Text.of(error));
+				return;
+			}
+		}
+
+		((SyncFallbackUser) player).setUsedSyncFallbacks(syncFallbacks);
+	}
+
+	public static void trySyncFallbackEverything(ServerPlayerEntity player) {
+		Multimap<Identifier, Identifier> syncFallbacks = HashMultimap.create();
+
+		for (RegistryKey<? extends Registry<?>> registryKey : SyncFallbackAccess.SYNC_FALLBACK_USABLE) {
+			Registry<?> registry = Objects.requireNonNull(Registry.REGISTRIES.get(registryKey.getValue()));
+			SyncFallbackAccess syncFallbackAccess = (SyncFallbackAccess) registry;
+			if (!RegistryAttributeHolder.get(registry).hasAttribute(RegistryAttribute.MODDED)) continue;
+			Set<Identifier> unsupportedIds;
+
+			if (!(unsupportedIds = syncFallbackAccess.getSyncFallbackUnsupported()).isEmpty()) {
+				String error = "Sync fallback unsupported for the following items of registry %s, please install mods providing them: %s".formatted(registryKey.getValue(), StringUtils.join(unsupportedIds.iterator(), ", "));
+				player.networkHandler.disconnect(Text.of(error));
+				return;
+			}
+
+			syncFallbacks.putAll(registryKey.getValue(), syncFallbackAccess.getSyncFallbackSupported());
+		}
+
+		((SyncFallbackUser) player).setUsedSyncFallbacks(syncFallbacks);
 	}
 }

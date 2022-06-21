@@ -16,6 +16,8 @@
 
 package net.fabricmc.fabric.impl.registry.sync;
 
+import net.fabricmc.fabric.impl.registry.sync.packet.SyncFallbackPacketHandler;
+
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
@@ -32,6 +34,9 @@ public class FabricRegistryClientInit implements ClientModInitializer {
 	public void onInitializeClient() {
 		registerSyncPacketReceiver(RegistrySyncManager.DIRECT_PACKET_HANDLER);
 		registerSyncPacketReceiver(RegistrySyncManager.NBT_PACKET_HANDLER);
+		// This is to allow canSend to work properly server-side;
+		// this channel is C2S-only.
+		ClientPlayNetworking.registerGlobalReceiver(SyncFallbackPacketHandler.HANDLER_ID, (client, handler, buf, responseSender) -> {});
 	}
 
 	private void registerSyncPacketReceiver(RegistryPacketHandler packetHandler) {
@@ -40,6 +45,11 @@ public class FabricRegistryClientInit implements ClientModInitializer {
 					LOGGER.error("Registry remapping failed!", e);
 
 					client.execute(() -> handler.getConnection().disconnect(Text.literal("Registry remapping failed: " + e.getMessage())));
+				}, (syncFallbackAttempted) -> {
+					ClientPlayNetworking.send(
+							SyncFallbackPacketHandler.HANDLER_ID,
+							SyncFallbackPacketHandler.createPacket(syncFallbackAttempted)
+					);
 				}));
 	}
 }

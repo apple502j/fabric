@@ -21,6 +21,7 @@ import java.util.Comparator;
 import java.util.List;
 import java.util.Map;
 import java.util.Optional;
+import java.util.Set;
 
 import com.google.common.collect.BiMap;
 import com.google.common.collect.HashBiMap;
@@ -31,7 +32,13 @@ import it.unimi.dsi.fastutil.ints.Int2ObjectMap;
 import it.unimi.dsi.fastutil.ints.Int2ObjectOpenHashMap;
 import it.unimi.dsi.fastutil.objects.Object2IntMap;
 import it.unimi.dsi.fastutil.objects.Object2IntOpenHashMap;
+import it.unimi.dsi.fastutil.objects.Object2ObjectOpenHashMap;
 import it.unimi.dsi.fastutil.objects.ObjectList;
+import it.unimi.dsi.fastutil.objects.ObjectOpenHashSet;
+import it.unimi.dsi.fastutil.objects.ReferenceOpenHashSet;
+
+import net.fabricmc.fabric.impl.registry.sync.RegistrySyncManager;
+
 import org.jetbrains.annotations.Nullable;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -43,9 +50,9 @@ import org.spongepowered.asm.mixin.injection.At;
 import org.spongepowered.asm.mixin.injection.Inject;
 import org.spongepowered.asm.mixin.injection.callback.CallbackInfoReturnable;
 
-import net.minecraft.util.registry.RegistryEntry;
 import net.minecraft.util.Identifier;
 import net.minecraft.util.registry.Registry;
+import net.minecraft.util.registry.RegistryEntry;
 import net.minecraft.util.registry.RegistryKey;
 import net.minecraft.util.registry.SimpleRegistry;
 
@@ -58,9 +65,10 @@ import net.fabricmc.fabric.impl.registry.sync.ListenableRegistry;
 import net.fabricmc.fabric.impl.registry.sync.RemapException;
 import net.fabricmc.fabric.impl.registry.sync.RemapStateImpl;
 import net.fabricmc.fabric.impl.registry.sync.RemappableRegistry;
+import net.fabricmc.fabric.impl.registry.sync.SyncFallbackAccess;
 
 @Mixin(SimpleRegistry.class)
-public abstract class MixinIdRegistry<T> extends Registry<T> implements RemappableRegistry, ListenableRegistry<T> {
+public abstract class MixinIdRegistry<T> extends Registry<T> implements RemappableRegistry, ListenableRegistry<T>, SyncFallbackAccess {
 	@Shadow
 	@Final
 	private ObjectList<RegistryEntry.Reference<T>> rawIdToEntry;
@@ -140,6 +148,15 @@ public abstract class MixinIdRegistry<T> extends Registry<T> implements Remappab
 	@Unique
 	private boolean fabric_isObjectNew = false;
 
+	@Unique
+	private final Map<Identifier, Identifier> syncFallbacks = new Object2ObjectOpenHashMap<>();
+
+	@Unique
+	private final Set<Identifier> syncFallbackAttempted = new ObjectOpenHashSet<>();
+
+	@Unique
+	private final Set<Identifier> syncFallbackUnsupported = new ObjectOpenHashSet<>();
+
 	@Inject(method = "set(ILnet/minecraft/util/registry/RegistryKey;Ljava/lang/Object;Lcom/mojang/serialization/Lifecycle;Z)Lnet/minecraft/util/registry/RegistryEntry;", at = @At("HEAD"))
 	public void setPre(int id, RegistryKey<T> registryId, T object, Lifecycle lifecycle, boolean checkDuplicateKeys, CallbackInfoReturnable<T> info) {
 		int indexedEntriesId = entryToRawId.getInt(object);
@@ -172,6 +189,9 @@ public abstract class MixinIdRegistry<T> extends Registry<T> implements Remappab
 	public void setPost(int id, RegistryKey<T> registryId, T object, Lifecycle lifecycle, boolean checkDuplicateKeys, CallbackInfoReturnable<T> info) {
 		if (fabric_isObjectNew) {
 			fabric_addObjectEvent.invoker().onEntryAdded(id, registryId.getValue(), object);
+			if (!RegistrySyncManager.VANILLA_NAMESPACES.contains(registryId.getValue().getNamespace())) {
+				this.syncFallbackUnsupported.add(registryId.getValue());
+			}
 		}
 	}
 
@@ -185,7 +205,7 @@ public abstract class MixinIdRegistry<T> extends Registry<T> implements Remappab
 			List<String> strings = null;
 
 			for (Identifier remoteId : remoteIndexedEntries.keySet()) {
-				if (!idToEntry.containsKey(remoteId)) {
+				if (!idToEntry.containsKey(remoteId) && !SyncFallbackAccess.canUseSyncFallback(this)) {
 					if (strings == null) {
 						strings = new ArrayList<>();
 					}
@@ -327,6 +347,7 @@ public abstract class MixinIdRegistry<T> extends Registry<T> implements Remappab
 		// entries was handled above, if it was necessary.
 		rawIdToEntry.clear();
 		entryToRawId.clear();
+		syncFallbackAttempted.clear();
 		nextId = 0;
 
 		List<Identifier> orderedRemoteEntries = new ArrayList<>(remoteIndexedEntries.keySet());
@@ -340,7 +361,17 @@ public abstract class MixinIdRegistry<T> extends Registry<T> implements Remappab
 			// This should only happen in AUTHORITATIVE mode, and as such we
 			// throw an exception otherwise.
 			if (object == null) {
-				if (mode != RemapMode.AUTHORITATIVE) {
+				if (mode == RemapMode.REMOTE && SyncFallbackAccess.canUseSyncFallback(this)) {
+					FABRIC_LOGGER.warn(identifier + " missing from registry, but requested! Attempting to use sync fallback.");
+
+					// We are making a hole in the registry.
+					if (nextId <= id) {
+						nextId = id + 1;
+					}
+
+					syncFallbackAttempted.add(identifier);
+					continue;
+				} else if (mode != RemapMode.AUTHORITATIVE) {
 					throw new RemapException(identifier + " missing from registry, but requested!");
 				} else {
 					FABRIC_LOGGER.warn(identifier + " missing from registry, but requested!");
@@ -394,5 +425,35 @@ public abstract class MixinIdRegistry<T> extends Registry<T> implements Remappab
 			fabric_prevIndexedEntries = null;
 			fabric_prevEntries = null;
 		}
+	}
+
+	@Override
+	public void registerSyncFallback(Identifier key, Identifier fallback) {
+		if (!SyncFallbackAccess.canUseSyncFallback(this)) {
+			throw new IllegalStateException("Cannot register sync fallback with this registry!");
+		}
+
+		syncFallbacks.put(key, fallback);
+		syncFallbackUnsupported.remove(key);
+	}
+
+	@Override
+	@Nullable
+	public Identifier getSyncFallback(Identifier id) {
+		return syncFallbacks.get(id);
+	}
+
+	@Override
+	public Set<Identifier> getSyncFallbackUnsupported() {
+		return this.syncFallbackUnsupported;
+	}
+
+	@Override
+	public Set<Identifier> getSyncFallbackSupported() {
+		return syncFallbacks.keySet();
+	}
+	@Override
+	public Set<Identifier> getSyncFallbackAttemptedIds() {
+		return this.syncFallbackAttempted;
 	}
 }

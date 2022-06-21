@@ -20,6 +20,8 @@ import it.unimi.dsi.fastutil.objects.Object2IntMap;
 
 import net.minecraft.util.Identifier;
 
+import java.util.Set;
+
 public interface RemappableRegistry {
 	/**
 	 * The mode the remapping process should take.
@@ -46,4 +48,6 @@ public interface RemappableRegistry {
 	void remap(String name, Object2IntMap<Identifier> remoteIndexedEntries, RemapMode mode) throws RemapException;
 
 	void unmap(String name) throws RemapException;
+
+	Set<Identifier> getSyncFallbackAttemptedIds();
 }

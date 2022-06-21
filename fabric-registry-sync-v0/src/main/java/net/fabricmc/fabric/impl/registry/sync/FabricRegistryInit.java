@@ -16,6 +16,10 @@
 
 package net.fabricmc.fabric.impl.registry.sync;
 
+import net.fabricmc.fabric.api.networking.v1.ServerPlayNetworking;
+
+import net.fabricmc.fabric.impl.registry.sync.packet.SyncFallbackPacketHandler;
+
 import net.minecraft.util.registry.Registry;
 
 import net.fabricmc.api.ModInitializer;
@@ -28,6 +32,14 @@ public class FabricRegistryInit implements ModInitializer {
 	public void onInitialize() {
 		ServerPlayConnectionEvents.JOIN.register((handler, sender, server) ->
 				RegistrySyncManager.sendPacket(server, handler.player));
+		ServerPlayNetworking.registerGlobalReceiver(
+				SyncFallbackPacketHandler.HANDLER_ID,
+				(server, player, handler, buf, responseSender) -> RegistrySyncManager.handleSyncFallbackRequest(player, SyncFallbackPacketHandler.readPacket(buf))
+		);
+		ServerPlayConnectionEvents.JOIN.register((handler, sender, server) -> {
+			if (ServerPlayNetworking.canSend(handler.player, SyncFallbackPacketHandler.HANDLER_ID)) return;
+			RegistrySyncManager.trySyncFallbackEverything(handler.player);
+		});
 
 		// Synced in PlaySoundS2CPacket.
 		RegistryAttributeHolder.get(Registry.SOUND_EVENT)

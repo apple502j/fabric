@@ -21,6 +21,8 @@ import java.util.Set;
 import net.fabricmc.fabric.api.event.registry.RegistryAttribute;
 import net.fabricmc.fabric.api.event.registry.RegistryAttributeHolder;
 
+import net.minecraft.util.registry.RegistryKey;
+
 public interface FabricRegistry extends RegistryAttributeHolder {
 	void build(Set<RegistryAttribute> attributes);
 }

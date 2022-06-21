@@ -34,6 +34,8 @@ import net.fabricmc.fabric.impl.registry.sync.RegistrySyncManager;
 import net.fabricmc.fabric.api.event.registry.RegistryAttribute;
 import net.fabricmc.fabric.api.event.registry.RegistryAttributeHolder;
 
+import java.util.Set;
+
 @Mixin(SimpleRegistry.class)
 public abstract class MixinSimpleRegistry<T> extends Registry<T> {
 	@Unique
@@ -55,7 +57,7 @@ public abstract class MixinSimpleRegistry<T> extends Registry<T> {
 
 	@Unique
 	private void onChange(RegistryKey<Registry<T>> registryKey) {
-		if (RegistrySyncManager.postBootstrap || !registryKey.getValue().getNamespace().equals("minecraft")) {
+		if (RegistrySyncManager.postBootstrap || !RegistrySyncManager.VANILLA_NAMESPACES.contains(registryKey.getValue().getNamespace())) {
 			RegistryAttributeHolder holder = RegistryAttributeHolder.get(this);
 
 			if (!holder.hasAttribute(RegistryAttribute.MODDED)) {

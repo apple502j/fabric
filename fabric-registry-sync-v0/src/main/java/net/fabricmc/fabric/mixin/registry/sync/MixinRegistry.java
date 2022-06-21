@@ -19,10 +19,14 @@ package net.fabricmc.fabric.mixin.registry.sync;
 import java.util.EnumSet;
 import java.util.Set;
 
+import it.unimi.dsi.fastutil.objects.Reference2ReferenceMap;
+import it.unimi.dsi.fastutil.objects.Reference2ReferenceOpenHashMap;
 import org.spongepowered.asm.mixin.Mixin;
+import org.spongepowered.asm.mixin.Shadow;
 import org.spongepowered.asm.mixin.Unique;
 
 import net.minecraft.util.registry.Registry;
+import net.minecraft.util.registry.RegistryKey;
 
 import net.fabricmc.fabric.api.event.registry.RegistryAttribute;
 import net.fabricmc.fabric.api.event.registry.RegistryAttributeHolder;
@@ -32,6 +36,9 @@ import net.fabricmc.fabric.impl.registry.sync.FabricRegistry;
 public abstract class MixinRegistry<T> implements RegistryAttributeHolder, FabricRegistry {
 	@Unique
 	private final EnumSet<RegistryAttribute> attributes = EnumSet.noneOf(RegistryAttribute.class);
+
+	@Shadow
+	public abstract RegistryKey<? extends Registry<T>> getKey();
 
 	@Override
 	public RegistryAttributeHolder addAttribute(RegistryAttribute attribute) {
