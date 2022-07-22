@@ -16,6 +16,7 @@
 
 package net.fabricmc.fabric.impl.renderer;
 
+import java.util.Locale;
 import java.util.Map;
 import java.util.function.Consumer;
 
@@ -23,6 +24,9 @@ import net.minecraft.client.texture.MissingSprite;
 import net.minecraft.client.texture.Sprite;
 import net.minecraft.client.texture.SpriteAtlasTexture;
 import net.minecraft.util.Identifier;
+import net.minecraft.util.crash.CrashException;
+import net.minecraft.util.crash.CrashReport;
+import net.minecraft.util.crash.CrashReportSection;
 
 import net.fabricmc.fabric.api.renderer.v1.mesh.QuadView;
 import net.fabricmc.fabric.api.renderer.v1.model.SpriteFinder;
@@ -130,13 +134,34 @@ public class SpriteFinderImpl implements SpriteFinder {
 		}
 
 		private Sprite findInner(Object quadrant, float u, float v) {
-			if (quadrant instanceof Sprite) {
-				return (Sprite) quadrant;
-			} else if (quadrant instanceof Node) {
-				return ((Node) quadrant).find(u, v);
-			} else {
-				return spriteAtlasTexture.getSprite(MissingSprite.getMissingSpriteId());
+			try {
+				if (quadrant instanceof Sprite) {
+					return (Sprite) quadrant;
+				} else if (quadrant instanceof Node) {
+					if (this == quadrant) throw new IllegalArgumentException("Recursive call to Node.findInner");
+					return ((Node) quadrant).find(u, v);
+				} else {
+					return spriteAtlasTexture.getSprite(MissingSprite.getMissingSpriteId());
+				}
+			} catch (RuntimeException | StackOverflowError e) {
+				CrashReport report = CrashReport.create(e, "Finding sprite");
+				CrashReportSection spriteSection = report.addElement("Sprite to be located");
+				spriteSection.add("Quadrant to search in", quadrant);
+				spriteSection.add("U", u);
+				spriteSection.add("V", v);
+				CrashReportSection nodeSection = report.addElement("Quadrants of this node");
+				nodeSection.add("Node", this);
+				nodeSection.add("lowLow", lowLow);
+				nodeSection.add("lowHigh", lowHigh);
+				nodeSection.add("highLow", highLow);
+				nodeSection.add("highHigh", highHigh);
+				throw new CrashException(report);
 			}
+		}
+
+		@Override
+		public String toString() {
+			return String.format(Locale.ROOT, "Node{midU=%.4f, midV=%.4f, cellRadius=%.4f}", midU, midV, cellRadius);
 		}
 	}
 
