@@ -70,6 +70,7 @@ public class SpriteFinderImpl implements SpriteFinder {
 	}
 
 	private class Node {
+		private static final int MAX_FIND_DEPTH = 24;
 		final float midU;
 		final float midV;
 		final float cellRadius;
@@ -127,20 +128,29 @@ public class SpriteFinderImpl implements SpriteFinder {
 		}
 
 		private Sprite find(float u, float v) {
+			return find(u, v, 0);
+		}
+
+		private Sprite find(float u, float v, int depth) {
 			if (u < midU) {
-				return v < midV ? findInner(lowLow, u, v) : findInner(lowHigh, u, v);
+				return v < midV ? findInner(lowLow, u, v, depth) : findInner(lowHigh, u, v, depth);
 			} else {
-				return v < midV ? findInner(highLow, u, v) : findInner(highHigh, u, v);
+				return v < midV ? findInner(highLow, u, v, depth) : findInner(highHigh, u, v, depth);
 			}
 		}
 
-		private Sprite findInner(Object quadrant, float u, float v) {
+		private Sprite findInner(Object quadrant, float u, float v, int depth) {
 			try {
 				if (quadrant instanceof Sprite) {
 					return (Sprite) quadrant;
 				} else if (quadrant instanceof Node) {
-					if (this == quadrant) throw new IllegalArgumentException("Recursive call to Node.findInner");
-					return ((Node) quadrant).find(u, v);
+					if (this == quadrant) {
+						throw new IllegalArgumentException("Recursive call to Node.findInner");
+					} else if (++depth > MAX_FIND_DEPTH) {
+						throw new IllegalArgumentException(String.format(Locale.ROOT, "Max depth for Node.findInner call (%d) exceeded", MAX_FIND_DEPTH));
+					}
+
+					return ((Node) quadrant).find(u, v, depth);
 				} else {
 					return spriteAtlasTexture.getSprite(MissingSprite.getMissingSpriteId());
 				}
@@ -150,6 +160,7 @@ public class SpriteFinderImpl implements SpriteFinder {
 				spriteSection.add("Quadrant to search in", quadrant);
 				spriteSection.add("U", u);
 				spriteSection.add("V", v);
+				spriteSection.add("Current depth", depth);
 				CrashReportSection nodeSection = report.addElement("Quadrants of this node");
 				nodeSection.add("Node", this);
 				nodeSection.add("lowLow", lowLow);
