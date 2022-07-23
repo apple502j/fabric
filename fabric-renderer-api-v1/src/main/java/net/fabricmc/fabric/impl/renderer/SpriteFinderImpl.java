@@ -20,6 +20,7 @@ import java.util.Locale;
 import java.util.Map;
 import java.util.function.Consumer;
 
+import net.minecraft.client.MinecraftClient;
 import net.minecraft.client.texture.MissingSprite;
 import net.minecraft.client.texture.Sprite;
 import net.minecraft.client.texture.SpriteAtlasTexture;
@@ -155,7 +156,8 @@ public class SpriteFinderImpl implements SpriteFinder {
 				nodeSection.add("lowHigh", lowHigh);
 				nodeSection.add("highLow", highLow);
 				nodeSection.add("highHigh", highHigh);
-				throw new CrashException(report);
+				MinecraftClient.printCrashReport(report);
+				throw new CrashException(report); // should be unreachable
 			}
 		}
 
