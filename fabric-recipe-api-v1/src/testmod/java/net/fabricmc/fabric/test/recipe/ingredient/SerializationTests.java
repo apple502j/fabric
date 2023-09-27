@@ -23,15 +23,18 @@ import com.google.gson.JsonParseException;
 import com.google.gson.JsonParser;
 import com.mojang.serialization.JsonOps;
 
+import net.minecraft.item.ItemStack;
 import net.minecraft.item.Items;
 import net.minecraft.recipe.Ingredient;
 import net.minecraft.test.GameTest;
 import net.minecraft.test.GameTestException;
 import net.minecraft.test.TestContext;
+import net.minecraft.text.Text;
 import net.minecraft.util.Util;
 
 import net.fabricmc.fabric.api.gametest.v1.FabricGameTest;
 import net.fabricmc.fabric.impl.recipe.ingredient.builtin.AllIngredient;
+import net.fabricmc.fabric.impl.recipe.ingredient.builtin.NbtIngredient;
 
 public class SerializationTests {
 	/**
@@ -77,6 +80,22 @@ public class SerializationTests {
 		));
 		String json = ingredient.toVanilla().toJson(false).toString();
 		context.assertTrue(json.equals(ingredientJson), "Unexpected json: " + json);
+		context.complete();
+	}
+
+	/**
+	 * Check that we can serialise a custom ingredient inside another custom ingredient.
+	 */
+	@GameTest(templateName = FabricGameTest.EMPTY_STRUCTURE)
+	public void testNestedCustomIngredientSerialization(TestContext context) {
+		ItemStack stack = new ItemStack(Items.NAME_TAG);
+		stack.setCustomName(Text.literal("Name Tag???"));
+
+		var ingredient = new AllIngredient(List.of(
+				new NbtIngredient(Ingredient.ofStacks(stack), stack.getNbt(), false).toVanilla()
+		));
+		String json = ingredient.toVanilla().toJson(false).toString();
+		System.out.println(json);
 		context.complete();
 	}
 }
