@@ -25,11 +25,8 @@ import com.mojang.brigadier.arguments.DoubleArgumentType;
 import com.mojang.brigadier.arguments.IntegerArgumentType;
 import com.mojang.serialization.Codec;
 import com.mojang.serialization.DataResult;
-import org.jetbrains.annotations.ApiStatus;
 import org.jspecify.annotations.Nullable;
 
-import net.minecraft.registry.Registries;
-import net.minecraft.registry.Registry;
 import net.minecraft.resource.featuretoggle.FeatureSet;
 import net.minecraft.server.dedicated.management.dispatch.GameRuleType;
 import net.minecraft.util.Identifier;
@@ -58,8 +55,10 @@ import net.fabricmc.fabric.impl.gamerule.rpc.FabricGameRuleType;
  * @see GameRuleRegistry
  */
 @SuppressWarnings("UnusedReturnValue")
-@ApiStatus.NonExtendable
-public class GameRuleBuilder<T> {
+public sealed class GameRuleBuilder<T> permits
+		GameRuleBuilder.BooleanRuleBuilder,
+		GameRuleBuilder.NumberRuleBuilder,
+		GameRuleBuilder.EnumRuleBuilder {
 	protected final T defaultValue;
 
 	protected Category category = Category.MISC;
@@ -171,27 +170,13 @@ public class GameRuleBuilder<T> {
 		return GameRuleRegistry.register(id, rule);
 	}
 
-	/**
-	 * Builds and registers a GameRule.
-	 * Deprecated to discourage registering a GameRule through String and not Identifier.
-	 * @param name the string
-	 * @return the built GameRule
-	 */
-	@Deprecated
-	public GameRule<T> buildAndRegister(String name) {
-		GameRule<T> rule = this.build();
-		return Registry.register(Registries.GAME_RULE, name, rule);
-	}
-
 	// RULE VISITORS
-	@ApiStatus.Internal
 	private static void visitDouble(Visitor visitor, GameRule<Double> rule) {
 		if (visitor instanceof FabricGameRuleVisitor) {
 			((FabricGameRuleVisitor) visitor).visitDouble(rule);
 		}
 	}
 
-	@ApiStatus.Internal
 	private static <E extends Enum<E>> void visitEnum(Visitor visitor, GameRule<E> rule) {
 		if (visitor instanceof FabricGameRuleVisitor) {
 			((FabricGameRuleVisitor) visitor).visitEnum(rule);
@@ -243,7 +228,8 @@ public class GameRuleBuilder<T> {
 		}
 	}
 
-	public abstract static class NumberRuleBuilder<T extends Number> extends GameRuleBuilder<T> {
+	public abstract static sealed class NumberRuleBuilder<T extends Number> extends GameRuleBuilder<T>
+			permits IntegerRuleBuilder, DoubleRuleBuilder {
 		NumberRuleBuilder(T defaultValue) {
 			super(defaultValue);
 		}
@@ -376,7 +362,7 @@ public class GameRuleBuilder<T> {
 			this.argumentType(null);
 			this.codec(createEnumCodec(defaultValue.getDeclaringClass()));
 			this.commandResultSupplier(value -> {
-				// For now we are gonna use the ordinal as the command result. Could be changed or set to relate to something else entirely. -i509VCB
+				// For now, we are going to use the ordinal as the command result. Could be changed or set to relate to something else entirely. -i509VCB
 				//noinspection Convert2MethodRef
 				return value.ordinal();
 			});
