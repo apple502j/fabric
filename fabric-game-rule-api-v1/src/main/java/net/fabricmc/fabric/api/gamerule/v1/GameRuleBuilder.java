@@ -191,9 +191,9 @@ public sealed class GameRuleBuilder<T> permits
 			super(defaultValue);
 			this.type = GameRuleType.BOOL;
 			this.acceptor = Visitor::visitBoolean;
-			this.argumentType =BoolArgumentType.bool();
+			this.argumentType = BoolArgumentType.bool();
 			this.codec = Codec.BOOL;
-			this.commandResultSupplier =bool -> bool ? 1 : 0;
+			this.commandResultSupplier = bool -> bool ? 1 : 0;
 		}
 
 		@Override
@@ -248,7 +248,7 @@ public sealed class GameRuleBuilder<T> permits
 			this.acceptor = Visitor::visitInt;
 			this.argumentType = IntegerArgumentType.integer();
 			this.codec = Codec.INT;
-			this.commandResultSupplier =integer -> integer;
+			this.commandResultSupplier = integer -> integer;
 		}
 
 		@Override
@@ -309,7 +309,7 @@ public sealed class GameRuleBuilder<T> permits
 			this.acceptor = GameRuleBuilder::visitDouble;
 			this.argumentType = DoubleArgumentType.doubleArg();
 			this.codec = Codec.DOUBLE;
-			this.commandResultSupplier =value -> Double.compare(value, 0.0D);
+			this.commandResultSupplier = value -> Double.compare(value, 0.0D);
 		}
 
 		@Override
@@ -372,7 +372,7 @@ public sealed class GameRuleBuilder<T> permits
 			this.acceptor = GameRuleBuilder::visitEnum;
 			this.argumentType = null;
 			this.codec = createEnumCodec(defaultValue.getDeclaringClass());
-			this.commandResultSupplier =value -> {
+			this.commandResultSupplier = value -> {
 				// For now, we are going to use the ordinal as the command result. Could be changed or set to relate to something else entirely. -i509VCB
 				//noinspection Convert2MethodRef
 				return value.ordinal();
