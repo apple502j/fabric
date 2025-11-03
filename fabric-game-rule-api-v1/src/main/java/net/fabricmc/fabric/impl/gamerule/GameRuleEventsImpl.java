@@ -38,9 +38,9 @@ public final class GameRuleEventsImpl {
 		//noinspection unchecked
 		return (Event<GameRuleEvents.ValueUpdate<T>>) (Event<?>) VALUE_UPDATES.computeIfAbsent(rule, gameRule -> {
 			//noinspection unchecked
-			return (Event<GameRuleEvents.ValueUpdate<?>>) (Event<?>) EventFactory.createArrayBacked(GameRuleEvents.ValueUpdate.class, (Function<GameRuleEvents.ValueUpdate<T>[], GameRuleEvents.ValueUpdate<T>>) callbacks -> (value, server) -> {
+			return (Event<GameRuleEvents.ValueUpdate<?>>) (Event<?>) EventFactory.createArrayBacked(GameRuleEvents.ValueUpdate.class, (Function<GameRuleEvents.ValueUpdate<T>[], GameRuleEvents.ValueUpdate<T>>) callbacks -> (r, value, server) -> {
 				for (GameRuleEvents.ValueUpdate<T> changedCallback : callbacks) {
-					changedCallback.onGameRuleUpdated(value, server);
+					changedCallback.onGameRuleUpdated(r, value, server);
 				}
 			});
 		});
